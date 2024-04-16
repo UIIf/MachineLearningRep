@@ -1,0 +1,92 @@
+import numpy as np
+import pandas as pd
+with open("input.txt", "r") as f:
+    m, n, k = map(int, f.readline().split())
+
+    X, y = [], []
+    for i in range(m):
+        data = list(map(int, f.readline().split()))
+        X.append(data)
+
+    X = pd.DataFrame(np.array(X), columns=list(range(n)) + [-1])
+
+fprint = open('output.txt', "w")
+
+y = X[-1].values
+fprint.write(f"{np.log((a := np.sum(y)) / (y.shape[0] - a)):.3f}\n")
+
+class OneRule:
+    def __init__(self, col: int | str):
+        self.col = col
+
+    def most_common(self, x):
+        uniqs, counts = np.unique(x, return_counts=True)
+        return uniqs[counts.argmax()]
+
+    def fit(self, X: np.ndarray, y: str | int):
+        self.rule = X.groupby(by=self.col)[y].aggregate(self.most_common)
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return self.rule[X[self.col]].values
+    
+    def score(self, X: np.ndarray, y: str | int) -> float:
+        # accuracy
+        return (self.predict(X) == X[y]).mean()
+
+    def __repr__(self):
+        return f"OneRule(col='{self.col}')"
+    
+    def __str__(self):
+        return str(self.rule)
+    
+models = [OneRule(i).fit(X,  -1) for i in range(n)]
+
+class Adaboost:
+    def __init__(self, k: int):
+        self.k = k
+
+    def fit(self, X: pd.DataFrame, y: int | str, models: list[OneRule]):
+        weights = np.ones(X.shape[0])
+        self.models = []
+        self.alpha = []
+        models_mask = np.ones(len(models), dtype=bool)
+        nums = np.arange(len(models))
+        for _ in range(self.k):
+            scores = [
+                ((models[n_model].predict(X) != X[y]) * weights).sum()
+                if models_mask[n_model]
+                else np.inf
+                for n_model in range(len(models))
+            ]
+            n_best_model = np.argmin(scores)
+            fprint.write(f"{n_best_model}\n")
+            error = scores[n_best_model]
+            alpha = 1 / 2 * np.log((weights.sum() - error) / error)
+            if alpha < 0:
+                break
+            self.alpha.append(alpha)
+
+            arrange = np.argsort(models[n_best_model].rule.index)
+
+            self.models.append(models[n_best_model])
+            weights *= np.exp(-alpha * X[y] * self.models[-1].predict(X))
+            weights /= weights.sum()
+            models_mask[n_best_model] = False
+        self.alpha = np.array(self.alpha)
+        return self
+
+    def predict(self, X: pd.DataFrame) -> pd.Series:
+        return pd.Series(
+            data=np.sign(
+                np.array([model.predict(X) for model in self.models]).T @ self.alpha
+            ),
+            index=X.index,
+        )
+
+    def score(self, X: pd.DataFrame, y: int | str) -> float:
+        # accuracy
+        return (self.predict(X) == X[y]).mean()
+    
+
+print(Adaboost(k).fit(X, -1, models).score(X, -1))
